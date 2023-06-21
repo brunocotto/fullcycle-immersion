@@ -25,37 +25,53 @@ func NewBook(orderChan chan *Order, orderChanOut chan *Order, wg *sync.WaitGroup
 
 // método de negociação
 func (b *Book) Trade() {
-	buyOrders := NewOrderQueue()
-	sellOrders := NewOrderQueue()
+	buyOrders := make(map[string]*OrderQueue)
+	sellOrders := make(map[string]*OrderQueue)
+	// buyOrders := NewOrderQueue()
+	// sellOrders := NewOrderQueue()
 
-	heap.Init(buyOrders)
-	heap.Init(sellOrders)
+	//heap.Init(buyOrders)
+	//heap.Init(sellOrders)
 
 	for order := range b.OrdersChan {
+		asset := order.Asset.ID
+		// cria uma fila com o nome da ação/asset
+		if buyOrders[asset] == nil {
+			buyOrders[asset] = NewOrderQueue()
+			heap.Init(buyOrders[asset])
+		}
+
+		if sellOrders[asset] == nil {
+			sellOrders[asset] = NewOrderQueue()
+			heap.Init(sellOrders[asset])
+		}
+
 		// a ordem é de compra?
 		if order.OrderType == "BUY" {
-			buyOrders.Push(order)
+			buyOrders[asset].Push(order)
 			// existe alguma ordem de venda?
 			// se existe, tem alguma ordem de venda com um preço menor ou igual a ordem de compra?
-			if sellOrders.Len() > 0 && sellOrders.Orders[0].Price <= order.Price {
-				sellOrder := sellOrders.Pop().(*Order)
+			if sellOrders[asset].Len() > 0 && sellOrders[asset].Orders[0].Price <= order.Price {
+				sellOrder := sellOrders[asset].Pop().(*Order)
 				if sellOrder.PendingShares > 0 {
 					transaction := NewTransaction(sellOrder, order, order.Shares, sellOrder.Price)
 					b.AddTransaction(transaction, b.Wg)
 					sellOrder.Transactions = append(sellOrder.Transactions, transaction)
+					//faltou
+					order.Transactions = append(order.Transactions, transaction)
 					b.OrderChanOut <- sellOrder
 					b.OrderChanOut <- order
 					// se ainda falta cotas, retornamos uma nova transação para a fila com o valor que faltou ser negociado
 					if sellOrder.PendingShares > 0 {
-						sellOrders.Push(sellOrder)
+						sellOrders[asset].Push(sellOrder)
 					}
 				}
 			}
 			// a ordem é de venda?
 		} else if order.OrderType == "SELL" {
-			sellOrders.Push(order)
-			if buyOrders.Len() > 0 && buyOrders.Orders[0].Price >= order.Price {
-				buyOrder := buyOrders.Pop().(*Order)
+			sellOrders[asset].Push(order)
+			if buyOrders[asset].Len() > 0 && buyOrders[asset].Orders[0].Price >= order.Price {
+				buyOrder := buyOrders[asset].Pop().(*Order)
 				if buyOrder.PendingShares > 0 {
 					transaction := NewTransaction(order, buyOrder, order.Shares, buyOrder.Price)
 					b.AddTransaction(transaction, b.Wg)
@@ -64,7 +80,7 @@ func (b *Book) Trade() {
 					b.OrderChanOut <- buyOrder
 					b.OrderChanOut <- order
 					if buyOrder.PendingShares > 0 {
-						buyOrders.Push(buyOrder)
+						buyOrders[asset].Push(buyOrder)
 					}
 				}
 			}
@@ -87,7 +103,8 @@ func (b *Book) AddTransaction(transaction *Transaction, wg *sync.WaitGroup) {
 	transaction.AddSellOrderPendingShares(-minShares)
 
 	//ordem de compra => o cara que compra => transação com um valor menor do que a compra desejada
-	transaction.BuyingOrder.Investor.UpdateAssetPosition(transaction.BuyingOrder.Investor.ID, +minShares)
+	//erro 2
+	transaction.BuyingOrder.Investor.UpdateAssetPosition(transaction.BuyingOrder.Asset.ID, +minShares)
 	transaction.AddBuyOrderPendingShares(-minShares)
 
 	transaction.CalculateTotal(transaction.Shares, transaction.BuyingOrder.Price)
